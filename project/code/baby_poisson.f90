@@ -9,7 +9,7 @@ module problem_setup
   implicit none
   integer,  parameter :: Nx = 20
   logical, parameter :: dirichlet_bc = .true.
-  logical, parameter :: use_direct = .true. 
+  logical, parameter :: use_direct = .false. 
   real(dp), parameter :: TOL = 1.0e-4_dp
 end module problem_setup
 
@@ -57,7 +57,8 @@ end module afuns
 module iterative_solver_D
   use type_defs
   implicit none
-  real(dp), allocatable, dimension(:) :: r_isd,x_isd,Ar_isd
+  real(dp), allocatable, dimension(:) :: r_isd,x_isd,Ar_isd,p
+  real(dp), allocatable, dimension(:,:) :: r_t, p_t, x_t
   real(dp) :: TOL_ISD
 contains
   subroutine set_tol_isd(tol)
@@ -69,7 +70,7 @@ contains
   subroutine allocate_isd(n)
     implicit none
     integer, intent(in) :: n
-    allocate(r_isd(n),x_isd(n),Ar_isd(n))
+    allocate(r_t(1,n),r_isd(n),x_isd(n),x_t(1,n),Ar_isd(n),p(n),p_t(1,n))
   end subroutine allocate_isd
 
   subroutine deallocate_isd
@@ -77,6 +78,55 @@ contains
     deallocate(r_isd,x_isd,Ar_isd)
   end subroutine deallocate_isd
   
+  subroutine bicg_d(x,b,n)
+    use type_defs
+    use afuns
+    implicit none
+    integer, intent(in) :: n
+    real(dp), intent(inout)  :: x(n)
+    real(dp), intent(inout)  :: b(n)
+    real(dp) :: res_norm2,res_norm20,alpha,res_norm2_t,beta_d,beta_n,beta
+    integer :: iter    
+    x_isd = 0.0_dp
+    x_t = 0.0_dp
+    r_isd = b
+    p = b
+    r_t(1,:) = b
+    p_t(1,:) = b
+
+    res_norm20 = sum(r_isd**2)
+    res_norm2 = res_norm20
+    iter = 0
+  
+    do while ((res_norm2/res_norm20 .gt. TOL_ISD**2) &
+         .and. (iter .lt. 10000)) 
+       call apply_1D_laplacian_D(Ar_isd,p,n)
+       
+       beta_d = sum(r_t(1,:)*r_isd)
+       alpha = beta_d / sum(p_t(1,:)*Ar_isd)
+       
+       x_isd = x_isd + alpha*p
+       x_t   = x_t   + alpha*p_t
+
+       r_isd = r_isd - alpha*Ar_isd 
+       call apply_1D_laplacian_D(Ar_isd,p_t(1,:),n)
+       r_t(1,:) = r_t(1,:) - alpha*Ar_isd 
+
+       beta_n   = sum(r_t(1,:)*r_isd)
+       beta     = beta_n/beta_d
+       
+       p   = r_isd  + beta*p
+       p_t = r_t    + beta*p_t
+
+       res_norm2 = sum(r_isd**2)
+       res_norm2_t = sum(r_t**2)
+       
+       iter = iter + 1
+       write(*,*) iter, sqrt(res_norm2) 
+    end do
+    x = x_isd
+  end subroutine bicg_d
+
   subroutine steep_descent_d(x,b,n)
     use type_defs
     use afuns
@@ -212,7 +262,8 @@ program ins
      else
         call allocate_isd(N_sys)
         call set_tol_isd(tol)
-        call steep_descent_d(u(1:nx),b,N_sys)
+        !call steep_descent_d(u(1:nx),b,N_sys)
+        call bicg_d(u(1:nx),b,N_sys)
         call deallocate_isd
      end if
      u(0) = exp(-x(0))
