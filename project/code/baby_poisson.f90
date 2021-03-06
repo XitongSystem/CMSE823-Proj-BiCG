@@ -7,16 +7,16 @@ end module type_defs
 module problem_setup
   use type_defs
   implicit none
-  integer,  parameter :: Nx = 20
-  logical, parameter :: dirichlet_bc = .true.
-  logical, parameter :: use_direct = .false. 
+  integer,  parameter :: Nx = 1000
+  logical, parameter :: dirichlet_bc = .false.
+  logical, parameter :: use_direct = .true. 
   real(dp), parameter :: TOL = 1.0e-4_dp
 end module problem_setup
 
 module arrs
   use type_defs
   implicit none
-  real(dp), allocatable, dimension(:) :: u,b,x
+  real(dp), allocatable, dimension(:) :: u,b,x,temp_b
 end module arrs
 
 module afuns
@@ -195,8 +195,8 @@ program ins
   ! on the domain [x] \in [0,1] with either Dirichlet or Neumann BC
   ! hx = 1/Nx
   real(dp) :: hx
-  integer :: i,n_iter,N_sys,info  
-  real(dp), allocatable, dimension(:,:) :: A
+  integer :: i,j,n_iter,N_sys,info  
+  real(dp), allocatable, dimension(:,:) :: A,temp
   real(dp), allocatable, dimension(:) :: action_of_A,u_inner
   integer, allocatable, dimension(:) ::  ipiv
   ! Set up the grid
@@ -233,6 +233,22 @@ program ins
         end do
      else
         ! FIX ME
+        do i = 1,N_sys
+          u_inner = 0.0
+          u_inner(i) = 1.0d0
+          call apply_1D_laplacian_N(action_of_A,u_inner,N_sys)
+          A(:,i) = action_of_A
+        end do
+        allocate(temp(N_sys+1,N_sys+1))
+        temp=1.0d0
+        temp(N_sys+1,N_sys+1) = 0.0
+        temp(1:N_sys,1:N_sys) = A
+        A = temp
+        ! do i=1,N_sys+1
+        !   do j=1,N_sys+1
+        !       write (*,*) temp(i,j)
+        !   end do
+        ! end do
      end if
   end if
 
@@ -262,8 +278,8 @@ program ins
      else
         call allocate_isd(N_sys)
         call set_tol_isd(tol)
-        !call steep_descent_d(u(1:nx),b,N_sys)
-        call bicg_d(u(1:nx),b,N_sys)
+        call steep_descent_d(u(1:nx),b,N_sys)
+        !call bicg_d(u(1:nx),b,N_sys)
         call deallocate_isd
      end if
      u(0) = exp(-x(0))
@@ -283,11 +299,21 @@ program ins
      ! We scale this by 1/2 to make the matrix symmetric
      b(0) = 0.5_dp*b(0) - hx*exp(-x(0))
      b(nx) = 0.5_dp*b(nx) + hx*exp(-x(nx))
+
+     allocate(temp_b(0:N_sys))
+     temp_b = 0.0_dp
+     temp_b(0:N_sys-1) = b(0:nx)
+     b = temp_b
+
      if (use_direct) then
         ! FIX ME
+        CALL DGETRF(N_sys+1,N_sys+1,A,N_sys+1,ipiv,INFO)
+        CALL DGETRS('N',N_sys+1,1,A,N_sys+1,IPIV,b,N_sys+1,INFO)
+        u = b(0:nx)
      else
         ! FIX ME
      end if
+     write(*,*) maxval(abs(u - exp(-x)))
   end if
     
 end program ins

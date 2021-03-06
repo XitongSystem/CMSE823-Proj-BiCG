@@ -8,8 +8,8 @@ $cmdFile="./apa.f90.T";
 
 for( $i = 1; $i <= 5; $i = 1+$i){
   printf "%d", $i;
-  for( $n = 0.1; $n <= 3; $n = 0.1+$n){
-  #for( $n = 200; $n <= 10000; $n = 2*$n){
+  #for( $n = 0.1; $n <= 3; $n = 0.1+$n){
+  for( $n = 20; $n <= 2000; $n = 2*$n){
     printf " %f ", $n;
     open(FILE,"$cmdFile") || die "cannot open file $cmdFile!" ;
     open(OUTFILE,">./apa.f90") || die "cannot open file $file!" ;
@@ -19,7 +19,7 @@ for( $i = 1; $i <= 5; $i = 1+$i){
       {
         # \b = word boundary, s/PATTERN/REPLACEMENT/
         #$_ =~ s/NNNN/$n/;
-        $_ =~ s/wwww/$n/;
+        $_ =~ s/NNNN/$n/;
         print OUTFILE $_;
       }
     close( OUTFILE );
