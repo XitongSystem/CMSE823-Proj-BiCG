@@ -9,14 +9,15 @@ module problem_setup
   implicit none
   integer,  parameter :: Nx = 1000
   logical, parameter :: dirichlet_bc = .false.
-  logical, parameter :: use_direct = .true. 
-  real(dp), parameter :: TOL = 1.0e-4_dp
+  logical, parameter :: use_direct = .false. 
+  real(dp), parameter :: TOL = 1.0e-12_dp
+  character (len=40) :: method= 'SD'
 end module problem_setup
 
 module arrs
   use type_defs
   implicit none
-  real(dp), allocatable, dimension(:) :: u,b,x,temp_b
+  real(dp), allocatable, dimension(:) :: u,b,x
 end module arrs
 
 module afuns
@@ -179,8 +180,33 @@ contains
     deallocate(r_isn,x_isn,Ar_isn)
   end subroutine deallocate_isn
 
-
   ! FIX ME PLEASE
+  subroutine steep_descent_N(x,b,n)
+    use type_defs
+    use afuns
+    implicit none
+    integer, intent(in) :: n
+    real(dp), intent(inout)  :: x(n)
+    real(dp), intent(inout)  :: b(n)
+    real(dp) :: res_norm2,res_norm20,alpha
+    integer :: iter,i
+    x_isn = 0.0_dp
+    r_isn = b
+    res_norm20 = sum(r_isn**2)
+    res_norm2 = res_norm20
+    iter = 0
+    do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) &
+        .and. (iter .lt. 1000000))
+      call apply_1D_laplacian_N(Ar_isn,r_isn,n)
+      alpha = res_norm2 / sum(r_isn*Ar_isn)
+      x_isn = x_isn + alpha*r_isn
+      r_isn = r_isn - alpha*Ar_isn
+      res_norm2 = sum(r_isn**2)
+      iter = iter + 1
+      write(*,*) iter, sqrt(res_norm2)
+    end do
+    x = x_isn
+  end subroutine steep_descent_N
 
 end module iterative_solver_N
 
@@ -190,13 +216,14 @@ program ins
   use arrs
   use afuns
   use iterative_solver_D
+  use iterative_solver_N
   implicit none
   ! This program solves u_xx = f 
   ! on the domain [x] \in [0,1] with either Dirichlet or Neumann BC
   ! hx = 1/Nx
   real(dp) :: hx
   integer :: i,j,n_iter,N_sys,info  
-  real(dp), allocatable, dimension(:,:) :: A,temp
+  real(dp), allocatable, dimension(:,:) :: A
   real(dp), allocatable, dimension(:) :: action_of_A,u_inner
   integer, allocatable, dimension(:) ::  ipiv
   ! Set up the grid
@@ -213,7 +240,7 @@ program ins
   else
      ! For Neumann BC the solution at the first and last gridpoint is
      ! part of the solve.
-     N_sys = nx+1
+     N_sys = nx+2
      ! Depending on what you want to do you may also need a nonsingular system...
   end if
   
@@ -233,22 +260,17 @@ program ins
         end do
      else
         ! FIX ME
-        do i = 1,N_sys
-          u_inner = 0.0
-          u_inner(i) = 1.0d0
-          call apply_1D_laplacian_N(action_of_A,u_inner,N_sys)
-          A(:,i) = action_of_A
+        do i = 1,N_sys-1
+            u_inner = 0.0
+            u_inner(i) = 1.0d0
+            call apply_1D_laplacian_N(action_of_A,u_inner,N_sys-1)
+            A(:,i) = action_of_A
         end do
-        allocate(temp(N_sys+1,N_sys+1))
-        temp=1.0d0
-        temp(N_sys+1,N_sys+1) = 0.0
-        temp(1:N_sys,1:N_sys) = A
-        A = temp
-        ! do i=1,N_sys+1
-        !   do j=1,N_sys+1
-        !       write (*,*) temp(i,j)
-        !   end do
-        ! end do
+        do i = 1,N_sys-1
+            A(i,N_sys) = 1
+            A(N_sys,i) = 1
+        end do
+        A(N_sys,N_sys)=0
      end if
   end if
 
@@ -278,8 +300,13 @@ program ins
      else
         call allocate_isd(N_sys)
         call set_tol_isd(tol)
-        call steep_descent_d(u(1:nx),b,N_sys)
-        !call bicg_d(u(1:nx),b,N_sys)
+        !call steep_descent gradient
+        if (method == "SD") then
+          call steep_descent_d(u(1:nx),b,N_sys)
+        !call bi-conjugate gradient
+        elseif (method == "BI") then
+          call bicg_d(u(1:nx),b,N_sys)
+        end if
         call deallocate_isd
      end if
      u(0) = exp(-x(0))
@@ -287,8 +314,8 @@ program ins
      write(*,*) maxval(abs(u - exp(-x)))
      
   else
-     do i = 0,nx
-        b(i) = hx*hx*exp(-x(i))
+     do i = 1,nx+1
+        b(i) = hx*hx*exp(-x(i-1))
      end do
      ! We must also account for the boundary conditions
      ! Here we have that u(1) - 2*u(0) + u(-1) = h*h*exp(-x(0))
@@ -297,23 +324,23 @@ program ins
      ! Plug in
      ! 2*u(1) - 2*u(0) = h*h*exp(-x(0)) + 2*h*(-exp(0)) 
      ! We scale this by 1/2 to make the matrix symmetric
-     b(0) = 0.5_dp*b(0) - hx*exp(-x(0))
-     b(nx) = 0.5_dp*b(nx) + hx*exp(-x(nx))
-
-     allocate(temp_b(0:N_sys))
-     temp_b = 0.0_dp
-     temp_b(0:N_sys-1) = b(0:nx)
-     b = temp_b
-
+     b(1) = 0.5_dp*b(1) - hx*exp(-x(0))
+     b(nx+1) = 0.5_dp*b(nx+1) + hx*exp(-x(nx))
+     b(nx+2) = 0
      if (use_direct) then
-        ! FIX ME
-        CALL DGETRF(N_sys+1,N_sys+1,A,N_sys+1,ipiv,INFO)
-        CALL DGETRS('N',N_sys+1,1,A,N_sys+1,IPIV,b,N_sys+1,INFO)
-        u = b(0:nx)
+        CALL DGETRF(N_sys,N_sys,A,N_sys,ipiv,INFO)
+        CALL DGETRS('N',N_sys,1,A,N_sys,IPIV,b,N_sys,INFO)
+        u(0:nx) = b(1:nx+1)
      else
         ! FIX ME
+        if (method == "SD") then
+          call allocate_isn(N_sys)
+          call set_tol_isn(tol)
+          call steep_descent_N(u(0:nx),b(1:nx+1),N_sys-1)
+          call deallocate_isn
+        end if
      end if
-     write(*,*) maxval(abs(u - exp(-x)))
+     write(*,*) maxval(abs(u - (exp(-x) -1.0d0+exp(-1.0d0) )))
   end if
     
 end program ins
