@@ -214,19 +214,37 @@ contains
   integer, intent(in) :: n
   real(dp), intent(inout) :: x(n)
   real(dp), intent(inout) :: b(n)
-  real(dp) :: res_norm2, res_norm20, alpha
+  real(dp) :: res_norm2, res_norm20, alpha, res_norm2_t, beta_d, beta_n, beta
   integer :: iter, i
   x_isn = 0.0_dp
+  x_t = 0.0_dp
   r_isn = b
+  p=b
+  r_t(1,:)=b
+  p_t(1,:)=b
+
+
   res_norm20 = sum(r_isn**2)
   res_norm2 = res_norm20
   iter = 0
+
   do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) & .and. (iter .lt. 1000000))
-  call apply_1D_laplacian_N(Ar_isn,r_isn,n)
-  alpha = res_norm2 / sum(r_isn*Ar_isn)
-  x_isn = x_isn + alpha*r_isn
+  call apply_1D_laplacian_N(Ar_isn,p,n)
+  beta_d = sum(r_t(1,:)*r_isn)
+  alpha = beta_d / sum(p_t(1,:)*Ar_isn)
+  x_isn = x_isn + alpha*p
+  x_t = x_t + alpha*p_t
   r_isn = r_isn - alpha*Ar_isn
+  call apply_1D_laplacian_N(Ar_isn,p_t(1,:),n)
+  r_t(1,:) = r_t(1,:) - alpha*Ar_isn
+  beta_n = sum(r_t(1,:)*r_isn)
+  beta = beta_n/beta_d
+
+  p=r_isn + beta*p
+  p_t = r_t + beta*p_t
+   
   res_norm2 = sum(r_isn**2)
+  res_norm2_t = sum(r_t**2)
   iter = iter+1
   write(*,*) iter, sqrt(res_norm2)
   end do
