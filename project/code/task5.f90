@@ -380,6 +380,11 @@ program ins
           call set_tol_isn(tol)
           call steep_descent_N(u(0:nx),b(1:nx+1),N_sys-1)
           call deallocate_isn
+        elseif (method=="BC") then
+          call allocate_isn(N_sys)
+          call set_tol_isn(tol)
+          call bicg(u(0:nx),b(1:nx+1),N_sys-1)
+          call deallocate_isn
         end if
      end if
      write(*,*) maxval(abs(u - (exp(-x) -1.0d0+exp(-1.0d0) )))
