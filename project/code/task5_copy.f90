@@ -11,7 +11,7 @@ module problem_setup
   logical, parameter :: dirichlet_bc = .false.
   logical, parameter :: use_direct = .false. 
   real(dp), parameter :: TOL = 1.0e-12_dp
-  character (len=40) :: method= 'BC'
+  character (len=40) :: method= 'SD'
 end module problem_setup
 
 module arrs
@@ -42,7 +42,7 @@ contains
     use type_defs
     implicit none
     integer, intent(in) :: n
-    real(dp), intent(out) :: au(n+1)
+    real(dp), intent(out) :: au(n)
     real(dp), intent(in)  ::  u(n)
     integer :: i
     Au(1) =   (u(2)   -        u(1)         )
@@ -50,10 +50,7 @@ contains
     do i = 2,n-1
        Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
     end do
-    Au(n+1)=0
-    do i=1,n
-       Au(n+1)=Au(n+1)+u(i)
-    end do
+    
   end subroutine apply_1D_laplacian_N
 
 end module afuns
@@ -162,8 +159,7 @@ end module iterative_solver_D
 module iterative_solver_N
   use type_defs
   implicit none
-  real(dp), allocatable, dimension(:) :: r_isn,x_isn,Ar_isn,p
-  real(dp), allocatable, dimension(:,:) :: r_t, p_t, x_t
+  real(dp), allocatable, dimension(:) :: r_isn,x_isn,Ar_isn
   real(dp) :: TOL_ISN
 contains
   
@@ -176,7 +172,7 @@ contains
   subroutine allocate_isn(n)
     implicit none
     integer, intent(in) :: n
-    allocate(r_isn(n),x_isn(n),Ar_isn(n),r_t(1,n),x_t(1,n),p(n),p_t(1,n))
+    allocate(r_isn(n),x_isn(n),Ar_isn(n))
   end subroutine allocate_isn
   
   subroutine deallocate_isn
@@ -232,7 +228,7 @@ contains
   res_norm2 = res_norm20
   iter = 0
 
-  do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) & .and. (iter .lt. 1000))
+  do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) & .and. (iter .lt. 1000000))
   call apply_1D_laplacian_N(Ar_isn,p,n)
   beta_d = sum(r_t(1,:)*r_isn)
   alpha = beta_d / sum(p_t(1,:)*Ar_isn)
