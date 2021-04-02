@@ -7,11 +7,11 @@ end module type_defs
 module problem_setup
   use type_defs
   implicit none
-  integer,  parameter :: Nx = 100
+  integer,  parameter :: Nx = 500
   logical, parameter :: dirichlet_bc = .false.
   logical, parameter :: use_direct = .false. 
   real(dp), parameter :: TOL = 1.0e-12_dp
-  character (len=40) :: method= 'SD'
+  character (len=40) :: method= 'BI'
 end module problem_setup
 
 module arrs
@@ -38,37 +38,37 @@ contains
     
   end subroutine apply_1D_laplacian_D
 
-!  subroutine apply_1D_laplacian_N(au,u,n)
-!    use type_defs
-!    implicit none
-!    integer, intent(in) :: n
-!    real(dp), intent(out) :: au(n)
-!    real(dp), intent(in)  ::  u(n)
-!    integer :: i
-!    Au(1) =   (u(2)   -        u(1)         )
-!    Au(n) =   (       -        u(n) + u(n-1))
-!    do i = 2,n-1
-!       Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
-!    end do
-!  end subroutine apply_1D_laplacian_N
+ subroutine apply_1D_laplacian_N(au,u,n)
+   use type_defs
+   implicit none
+   integer, intent(in) :: n
+   real(dp), intent(out) :: au(n)
+   real(dp), intent(in)  ::  u(n)
+   integer :: i
+   Au(1) =   (u(2)   -        u(1)         )
+   Au(n) =   (       -        u(n) + u(n-1))
+   do i = 2,n-1
+      Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
+   end do
+ end subroutine apply_1D_laplacian_N
   
-  subroutine apply_1D_laplacian_N(au,u,n)
-    use type_defs
-    implicit none
-    integer, intent(in) :: n
-    real(dp), intent(out) :: au(n+1)
-    real(dp), intent(in)  ::  u(n)
-    integer :: i
-    Au(1) =   (u(2)   -        u(1)         )
-    Au(n) =   (       -        u(n) + u(n-1))
-    do i = 2,n-1
-       Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
-    end do
-    Au(n+1)=0
-    do i=1,n
-       Au(n+1)=Au(n+1)+u(i)
-    end do
-  end subroutine apply_1D_laplacian_N
+  ! subroutine apply_1D_laplacian_N(au,u,n)
+  !   use type_defs
+  !   implicit none
+  !   integer, intent(in) :: n
+  !   real(dp), intent(out) :: au(n+1)
+  !   real(dp), intent(in)  ::  u(n)
+  !   integer :: i
+  !   Au(1) =   (u(2)   -        u(1)         )
+  !   Au(n) =   (       -        u(n) + u(n-1))
+  !   do i = 2,n-1
+  !      Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
+  !   end do
+  !   Au(n+1)=0
+  !   do i=1,n
+  !      Au(n+1)=Au(n+1)+u(i)
+  !   end do
+  ! end subroutine apply_1D_laplacian_N
 
 end module afuns
 
@@ -191,14 +191,12 @@ contains
   subroutine allocate_isn(n)
     implicit none
     integer, intent(in) :: n
-    !allocate(r_isn(n),x_isn(n),Ar_isn(n))
-    !allocate(r_isn(n),x_isn(n),Ar_isn(n),r_t(1,n),x_t(1,n),p(n),p_t(1,n))
     allocate(r_isn(n),x_isn(n),Ar_isn(n),r_t(1,n),x_t(1,n),p(n),p_t(1,n))
   end subroutine allocate_isn
   
   subroutine deallocate_isn
     implicit none
-    deallocate(r_isn,x_isn,Ar_isn)
+    deallocate(r_isn,x_isn,Ar_isn,r_t,x_t,p,p_t)
   end subroutine deallocate_isn
 
   ! FIX ME PLEASE
@@ -236,24 +234,30 @@ contains
     integer, intent(in) :: n
     real(dp), intent(inout) :: x(n)
     real(dp), intent(inout) :: b(n)
-    real(dp) :: res_norm2, res_norm20, alpha, res_norm2_t, beta_d, beta_n, beta
+    real(dp) :: res_norm2, res_norm20, alpha, res_norm2_t, beta_d, beta_n, beta, betadenom
     integer :: iter
     x_isn = 0.0_dp
     x_t = 0.0_dp
     r_isn = b
     p = b
+
     r_t(1,:) = b
     p_t(1,:) = b
 
     res_norm20 = sum(r_isn**2)
     res_norm2 = res_norm20
     iter = 0
-
     do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) &
          .and. (iter .lt. 1000000))
       call apply_1D_laplacian_N(Ar_isn,p,n)
       beta_d = sum(r_t(1,:)*r_isn)
-      alpha = beta_d / sum(p_t(1,:)*Ar_isn)
+      betadenom = sum(p_t(1,:)*Ar_isn)
+      alpha = beta_d / betadenom
+
+      if (abs(betadenom) < 1e-10 .or. abs(beta_d) < 1e-10) then
+        EXIT
+      endif
+
       x_isn = x_isn + alpha*p
       x_t = x_t + alpha*p_t
       r_isn = r_isn - alpha*Ar_isn
@@ -268,6 +272,7 @@ contains
       res_norm2 = sum(r_isn**2)
       res_norm2_t = sum(r_t**2)
       iter = iter+1
+
       write(*,*) iter, sqrt(res_norm2)
     end do
     x = x_isn !!!!
@@ -396,7 +401,7 @@ program ins
         u(0:nx) = b(1:nx+1)
      else
         ! FIX ME
-        call allocate_isn(N_sys)
+        call allocate_isn(N_sys-1)
         call set_tol_isn(tol)
         !call steep_descent gradient
         if (method == "SD") then
