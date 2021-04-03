@@ -24,7 +24,7 @@ module problem_setup
   real(dp), parameter :: TOL = 1.0e-12_dp
 
   logical, parameter :: use_dense_uv = .false.
-  logical, parameter :: use_dense_p = .true. 
+  logical, parameter :: use_dense_p = .false. 
 
 end module problem_setup
 
@@ -236,6 +236,95 @@ contains
 end module iterative_solver_D
 
 
+! module for Neumann BiCG
+module iterative_solver_N
+  use type_defs
+  implicit none
+  !real(dp), allocatable, dimension(:) :: r_isn,x_isn,Ar_isn
+  real(dp), allocatable, dimension(:) :: r_isn,x_isn,Ar_isn,pp
+  real(dp), allocatable, dimension(:,:) :: r_t, p_t, x_t
+  real(dp) :: TOL_ISN
+contains
+  
+  subroutine set_tol_isn(tol)
+    implicit none
+    real(dp) :: tol
+    TOL_ISN = tol
+  end subroutine set_tol_isn
+  
+  subroutine allocate_isn(n)
+    implicit none
+    integer, intent(in) :: n
+    allocate(r_isn(n),x_isn(n),Ar_isn(n),r_t(1,n),x_t(1,n),pp(n),p_t(1,n))
+  end subroutine allocate_isn
+  
+  subroutine deallocate_isn
+    implicit none
+    deallocate(r_isn,x_isn,Ar_isn,r_t,x_t,pp,p_t)
+  end subroutine deallocate_isn
+  
+  subroutine bicg_n(x,b,n,nx,ny,hx,hy,nu,k)
+    use type_defs
+    use afuns
+    implicit none
+    integer, intent(in) :: n
+    real(dp), intent(inout) :: x(n)
+    real(dp), intent(inout) :: b(n)
+    integer, intent(in) :: nx,ny
+    real(dp), intent(in)  ::  hx,hy,nu,k
+    real(dp) :: res_norm2, res_norm20, alpha, res_norm2_t, beta_d, beta_n, beta, betadenom
+    integer :: iter
+    x_isn = 0.0_dp
+    x_t = 0.0_dp
+    r_isn = b
+    pp = b
+
+    r_t(1,:) = b
+    p_t(1,:) = b
+
+    res_norm20 = sum(r_isn**2)
+    res_norm2 = res_norm20
+    iter = 0
+    do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) &
+         .and. (iter .lt. 1000000))
+         
+         
+      !call apply_1D_laplacian_N(Ar_isn,p,n)
+      call apply_pressure_laplacian(Ar_isn,pp,nx,ny,hx,hy)
+      
+      beta_d = sum(r_t(1,:)*r_isn)
+      betadenom = sum(p_t(1,:)*Ar_isn)
+      alpha = beta_d / betadenom
+
+      if (abs(betadenom) < 1e-10 .or. abs(beta_d) < 1e-10) then
+      !if (abs(betadenom) < TOL_ISN .or. abs(beta_d) < TOL_ISN) then
+        EXIT
+      endif
+
+      x_isn = x_isn + alpha*pp
+      x_t = x_t + alpha*p_t
+      r_isn = r_isn - alpha*Ar_isn
+      !call apply_1D_laplacian_N(Ar_isn,p_t(1,:),n)
+      call apply_pressure_laplacian(Ar_isn,p_t(1,:),nx,ny,hx,hy)
+      
+      r_t(1,:) = r_t(1,:) - alpha*Ar_isn
+      beta_n = sum(r_t(1,:)*r_isn)
+      beta = beta_n/beta_d
+
+      pp=r_isn + beta*pp
+      p_t = r_t + beta*p_t
+   
+      res_norm2 = sum(r_isn**2)
+      res_norm2_t = sum(r_t**2)
+      iter = iter+1
+
+      write(*,*) iter, sqrt(res_norm2)
+    end do
+    x = x_isn
+  end subroutine bicg_n
+  
+end module iterative_solver_N
+
 program ins
   use type_defs
   use problem_setup
@@ -243,6 +332,7 @@ program ins
   use matrices
   use afuns
   use iterative_solver_D
+  use iterative_solver_N
   implicit none
   ! This program solves the incompressible Navier-Stokes equations on
   ! the domain [x,y] \in [0,Lx] \times [0,Ly] using a grid spacing
@@ -301,10 +391,6 @@ program ins
      write(*,*) 'Precomputations/allocations for BiCG'
      allocate(uvec((Nx-1)*(Ny-1)),vvec((Nx-1)*(Ny-1)))
      
-     
-     
-     
-     
   end if
   if (use_dense_p) then
      ! setup pressure laplacian
@@ -332,6 +418,15 @@ program ins
      CALL DGETRF(sys_size_pbig,sys_size_pbig,LapPbig,sys_size_pbig,ipiv_pbig,INFO)
   else
      ! Do necessary precomputations / allocations here for your code
+     
+     
+     
+     
+     
+     
+     
+     
+     
   end if
   call cpu_time(time2)
   write(*,*) 'Setup and factorization took ',time2-time1 ,' seconds'
@@ -397,6 +492,23 @@ program ins
      end do
   else
      ! !!! YOUR CODE GOES HERE !!!!
+     
+     
+     !!!! Solve pressure problem with BiCG !!!!
+     call allocate_isn(sys_size_pbig)
+     call set_tol_isn(tol)
+     call bicg_n(pbvecbig,pbvecbig,sys_size_pbig,nx,ny,hx,hy,nu,k)
+     ! Swap long vector into 2D array
+     do j = 0,ny
+        do i = 0,nx
+           p(i,j) = pbvecbig(1+i+j*(nx+1))
+        end do
+     end do
+     call deallocate_isn
+        
+        
+        
+        
   end if
   
   call computeLE(Leu,Lev,u,v,p,hx,hy,nx,ny)
@@ -420,6 +532,23 @@ program ins
      end do
   else
      ! !!! YOUR CODE GOES HERE !!!!
+     
+     
+     !!!! Solve pressure problem with BiCG !!!!
+     call allocate_isn(sys_size_pbig)
+     call set_tol_isn(tol)
+     call bicg_n(pbvecbig,pbvecbig,sys_size_pbig,nx,ny,hx,hy,nu,k)
+     ! Swap long vector into 2D array
+     do j = 0,ny
+        do i = 0,nx
+           p(i,j) = pbvecbig(1+i+j*(nx+1))
+        end do
+     end do
+     call deallocate_isn
+        
+        
+        
+        
   end if
   call computeLE(Leuold,Levold,uold,vold,pold,hx,hy,nx,ny)
   call computeLI(Liuold,Livold,uold,vold,nu,hx,hy,nx,ny)
@@ -480,7 +609,25 @@ program ins
            end do
         end do
      else
-        ! !!! YOUR CODE GOES HERE !!!!
+     
+     
+     
+     
+        !!!! Solve pressure problem with BiCG !!!!
+        call allocate_isn(sys_size_pbig)
+        call set_tol_isn(tol)
+        call bicg_n(pbvecbig,pbvecbig,sys_size_pbig,nx,ny,hx,hy,nu,k)
+        ! Swap long vector into 2D array
+        do j = 0,ny
+           do i = 0,nx
+              p(i,j) = pbvecbig(1+i+j*(nx+1))
+           end do
+        end do
+        call deallocate_isn
+        
+        
+        
+        
      end if
      ! Swap
      Liuold=Liu
