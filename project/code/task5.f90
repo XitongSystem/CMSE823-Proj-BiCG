@@ -8,10 +8,10 @@ module problem_setup
   use type_defs
   implicit none
   integer,  parameter :: Nx = 1000
-  logical, parameter :: dirichlet_bc = .false.
+  logical, parameter :: dirichlet_bc = .true.
   logical, parameter :: use_direct = .false. 
   real(dp), parameter :: TOL = 1.0e-12_dp
-  character (len=40) :: method= 'BC'
+  character (len=40) :: method= 'BI'
 end module problem_setup
 
 module arrs
@@ -126,7 +126,7 @@ contains
        res_norm2_t = sum(r_t**2)
        
        iter = iter + 1
-       write(*,*) iter, sqrt(res_norm2) 
+       write(*,*) x_isd 
     end do
     x = x_isd
   end subroutine bicg_d
