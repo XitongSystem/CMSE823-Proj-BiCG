@@ -250,7 +250,7 @@ contains
   res_norm2 = sum(r_isn**2)
   res_norm2_t = sum(r_t**2)
   iter = iter+1
-  write(*,*) iter, sqrt(res_norm2)
+  write(*,*) p 
   end do
   x= x_isn
   end subroutine bicg
