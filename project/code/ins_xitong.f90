@@ -10,18 +10,18 @@ module type_defs
    ! and the discretization parameters, number of gridpoints, timestep size...
    use type_defs
    implicit none
-   real(dp), parameter :: Lx = 1.0_dp
-   real(dp), parameter :: Ly = 1.0_dp
-   real(dp), parameter :: nu = 0.02_dp     ! Viscosity
-   integer,  parameter :: Nx = 25          ! Number of gridpoints in x
-   integer,  parameter :: Ny = 25          ! Number of gridpoints in y
-   integer,  parameter :: Nsteps = 5000    ! Number of timesteps
-   logical, parameter :: do_plot = .true.  ! Plot?
-   integer,  parameter :: Nplot = 100      ! If so plot every Nplot steps
-   real(dp), parameter :: k = 0.00125_dp      ! Timestep
-   real(dp), parameter :: alpha = 0.1_dp/k
-   real(dp), parameter :: pi = acos(-1.d0)
-   real(dp), parameter :: TOL = 1.0e-12_dp
+  real(dp), parameter :: Lx = 1.0_dp
+  real(dp), parameter :: Ly = 1.0_dp
+  real(dp), parameter :: nu = 0.0025_dp      ! Viscosity
+  integer,  parameter :: Nx = 50          ! Number of gridpoints in x
+  integer,  parameter :: Ny = 50          ! Number of gridpoints in y
+  integer,  parameter :: Nsteps = 1000    ! Number of timesteps
+  logical, parameter :: do_plot = .true.  ! Plot?
+  integer,  parameter :: Nplot = 10      ! If so plot every Nplot steps
+  real(dp), parameter :: k = 0.0025_dp      ! Timestep
+  real(dp), parameter :: alpha = 0.1_dp/k
+  real(dp), parameter :: pi = acos(-1.d0)
+  real(dp), parameter :: TOL = 1.0e-12_dp
 
    logical, parameter :: use_dense_uv = .false.
    logical, parameter :: use_dense_p = .false. 
@@ -186,6 +186,7 @@ module type_defs
      real(dp), intent(in)  :: A(n,n)
      real(dp), intent(inout)  :: x(n)
      real(dp), intent(inout)  :: b(n)
+     real(dp) :: a_temp(1,n)
      real(dp) :: res_norm2,res_norm20,alpha,res_norm2_t,beta_d,beta_n,beta
      integer :: iter, niter
      x_isd = 0.0_dp
@@ -202,9 +203,10 @@ module type_defs
      do while ((res_norm2/res_norm20 .gt. TOL_ISD**2) &
           .and. (iter .lt. 1000000)) 
         !call apply_1D_laplacian_D(Ar_isd,p_d,n)
-         do niter = 1,n
-            Ar_isd(niter) = sum(A(niter,:)*p_d)
-         end do
+         !do niter = 1,n
+         !   Ar_isd(niter) = sum(A(niter,:)*p_d)
+         !end do
+        Ar_isd = MATMUL(A, p_d)
         beta_d = sum(r_t(1,:)*r_isd)
         alpha = beta_d / sum(p_d_t(1,:)*Ar_isd)
         
@@ -213,9 +215,11 @@ module type_defs
  
         r_isd = r_isd - alpha*Ar_isd 
         !call apply_1D_laplacian_D(Ar_isd,p_d_t(1,:),n)
-        do niter = 1,n
-         Ar_isd(niter) = sum(p_d_t(1,:)*A(:,niter))
-        end do
+        !do niter = 1,n
+        ! Ar_isd(niter) = sum(p_d_t(1,:)*A(:,niter))
+        !end do
+        a_temp = MATMUL(p_d_t, A)
+        Ar_isd = a_temp(1,:)
         r_t(1,:) = r_t(1,:) - alpha*Ar_isd 
  
         beta_n   = sum(r_t(1,:)*r_isd)
@@ -259,7 +263,7 @@ module iterative_solver_N
      deallocate(r_isn,x_isn,Ar_isn,r_t,x_t,p_n,p_n_t)
    end subroutine deallocate_isn
 
-   subroutine bicg_n(x,b,A,n)
+   subroutine bicg_n(x,b,A,n,nx,ny,hx,hy)
      use type_defs
      use afuns
      implicit none
@@ -267,8 +271,11 @@ module iterative_solver_N
      real(dp), intent(in) :: A(n,n)
      real(dp), intent(inout) :: x(n)
      real(dp), intent(inout) :: b(n)
+     real(dp) :: a_temp(1,n)
+     integer, intent(in) :: nx,ny
+     real(dp), intent(in)  ::  hx,hy
      real(dp) :: res_norm2, res_norm20, alpha, res_norm2_t, beta_d, beta_n, beta, betadenom
-     integer :: iter, niter
+     integer :: iter
      x_isn = 0.0_dp
      x_t = 0.0_dp
      r_isn = b
@@ -283,26 +290,30 @@ module iterative_solver_N
      do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) &
           .and. (iter .lt. 1000000))
        !call apply_1D_laplacian_N(Ar_isn,p_n,n)
-       do niter = 1,n
-         Ar_isn(niter) = sum(A(niter,:)*p_n)
-       end do
+       !do niter = 1,n
+       !  Ar_isn(niter) = sum(A(niter,:)*p_n)
+       !end do
+       call apply_pressure_laplacian(Ar_isn(1:n-1),p_n(1:n-1),nx,ny,hx,hy)
+       Ar_isn(1:n-1) = Ar_isn(1:n-1) + p_n(n)
+       Ar_isn(n) = sum(p_n(1:n-1))
 
        beta_d = sum(r_t(1,:)*r_isn)
        betadenom = sum(p_n_t(1,:)*Ar_isn)
        alpha = beta_d / betadenom
  
-       if (abs(betadenom) < 1e-10 .or. abs(beta_d) < 1e-10) then
-         EXIT
-       endif
+       !if (abs(betadenom) < 1e-10) then
+       !  EXIT
+       !endif
  
        x_isn = x_isn + alpha*p_n
        x_t = x_t + alpha*p_n_t
        r_isn = r_isn - alpha*Ar_isn
        !call apply_1D_laplacian_N(Ar_isn,p_n_t(1,:),n)
-       do niter = 1,n
-         Ar_isn(niter) = sum(p_n_t(1,:)*A(:,niter))
-       end do
-
+       !do niter = 1,n
+       !  Ar_isn(niter) = sum(p_n_t(1,:)*A(:,niter))
+       !end do
+       a_temp = MATMUL(p_n_t, A)
+       Ar_isn = a_temp(1,:)
        r_t(1,:) = r_t(1,:) - alpha*Ar_isn
        beta_n = sum(r_t(1,:)*r_isn)
        beta = beta_n/beta_d
@@ -333,10 +344,10 @@ module iterative_solver_N
    ! This program solves the incompressible Navier-Stokes equations on
    ! the domain [x,y] \in [0,Lx] \times [0,Ly] using a grid spacing
    ! hx = Lx/Nx, hy = Ly/Ny.
-   real(dp) :: hx,hy,time1,time2
-   integer :: i,j,sys_size_p,sys_size_pbig,info,nt,sys_size_uv
+   real(dp) :: hx,hy,time1,time2,a,b
+   integer :: i,j,ii,jj,sys_size_p,sys_size_pbig,info,nt,sys_size_uv
    character(100) :: str
- 
+   
    ! Set up the grid, we include the ghost points.
    hx = Lx/real(Nx,dp)
    hy = Ly/real(Ny,dp)
@@ -472,19 +483,58 @@ module iterative_solver_N
    call random_number(v(0:nx,0:ny))
    u(0:nx,0:ny) = u(0:nx,0:ny) - 0.5_dp
    v(0:nx,0:ny) = v(0:nx,0:ny) - 0.5_dp
- 
-   do j = 0,ny
-      do i = 0,nx
-         ! u(i,j) = sin(pi*x(i))*sin(pi*y(j))
-         ! v(i,j) = sin(pi*x(i))*sin(pi*y(j))
-         call taylor(u(i,j),v(i,j),X(i),Y(j),0.5d0,0.5d0,0.1d0,1.0_dp)
-      end do
-   end do
- 
-   ! Initial data for a lid-driven cavity flow
-   guy(2,:) = 1.0_dp
-   u = 0.d0
-   v = 0.d0
+    
+   !  do j = 0,ny
+   !       do i = nx/4,nx/2
+   !          !u(i,j) = sin(pi*x(i))*sin(pi*y(j))
+   !          !v(i,j) = sin(pi*x(i))*sin(pi*y(j))
+   !          call taylor(u(i,j),v(i,j),X(i),Y(j),0.5d0,0.5d0,0.2d0,30.0_dp)
+   !       end do
+   !  end do
+    
+   !  do j = 0,ny
+   !       do i = nx/2,nx
+   !          !u(i,j) = sin(pi*x(i))*sin(pi*y(j))
+   !          !v(i,j) = sin(pi*x(i))*sin(pi*y(j))
+   !          call taylor(u(i,j),v(i,j),X(i),Y(j),0.75d0,0.25d0,0.1d0,50.0_dp)
+   !       end do
+   !  end do
+   !  do j = 0,ny
+   !       do i = 0,nx/2
+   !          !u(i,j) = sin(pi*x(i))*sin(pi*y(j))
+   !          !v(i,j) = sin(pi*x(i))*sin(pi*y(j))
+   !          call taylor(u(i,j),v(i,j),X(i),Y(j),0.25d0,0.75d0,0.1d0,50.0_dp)
+   !       end do
+   !  end do
+
+   do jj = 2,8,2
+     do ii = 2,8,2
+        do j = 0,ny
+           do i = 0,nx
+              call taylor(a,b,X(i),Y(j),&
+                   dble(ii)*0.1d0,dble(jj)*0.1d0,0.1d0,1.0_dp)
+              u(i,j) = u(i,j) + a
+              v(i,j) = v(i,j) + b
+           end do
+        end do
+     end do
+  end do
+  do jj = 3,7,2
+     do ii = 3,7,2
+        do j = 0,ny
+           do i = 0,nx
+              call taylor(a,b,X(i),Y(j),&
+                   dble(ii)*0.1d0,dble(jj)*0.1d0,0.1d0,1.0_dp)
+              u(i,j) = u(i,j) + a
+              v(i,j) = v(i,j) + b
+           end do
+        end do
+     end do
+  end do
+    !  ! Initial data for a lid-driven cavity flow
+    !guy(2,:) = 1.0_dp
+    !  u = 0.d0
+    !  v = 0.d0
  
    ! start up the computation with a single Euler step (backwards in time).
    ! We need to find the current pressure to compute the advection term.
@@ -512,7 +562,7 @@ module iterative_solver_N
       !!!! Solve pressure problem with BiCG !!!!
       call allocate_isn(sys_size_pbig)
       call set_tol_isn(tol)
-      call bicg_n(pbvecbig,pbvecbig,LapPbig,sys_size_pbig)
+      call bicg_n(pbvecbig,pbvecbig,LapPbig,sys_size_pbig, nx,ny,hx,hy)
       ! Swap long vector into 2D array
       do j = 0,ny
          do i = 0,nx
@@ -546,7 +596,7 @@ module iterative_solver_N
       !!!! Solve pressure problem with BiCG !!!!
       call allocate_isn(sys_size_pbig)
       call set_tol_isn(tol)
-      call bicg_n(pbvecbig,pbvecbig,LapPbig,sys_size_pbig)
+      call bicg_n(pbvecbig,pbvecbig,LapPbig,sys_size_pbig,nx,ny,hx,hy)
       ! Swap long vector into 2D array
       do j = 0,ny
          do i = 0,nx
@@ -620,7 +670,7 @@ module iterative_solver_N
       !!!! Solve pressure problem with BiCG !!!!
          call allocate_isn(sys_size_pbig)
          call set_tol_isn(tol)
-         call bicg_n(pbvecbig,pbvecbig,LapPbig,sys_size_pbig)
+         call bicg_n(pbvecbig,pbvecbig,LapPbig,sys_size_pbig,nx,ny,hx,hy)
          ! Swap long vector into 2D array
          do j = 0,ny
             do i = 0,nx
