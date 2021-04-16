@@ -8,10 +8,10 @@ module problem_setup
   use type_defs
   implicit none
   integer,  parameter :: Nx = 500
-  logical, parameter :: dirichlet_bc = .false.
+  logical, parameter :: dirichlet_bc = .true.
   logical, parameter :: use_direct = .false. 
   real(dp), parameter :: TOL = 1.0e-12_dp
-  character (len=40) :: method= 'BI'
+  character (len=40) :: method= 'SD'
 end module problem_setup
 
 module arrs
@@ -51,25 +51,24 @@ contains
       Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
    end do
  end subroutine apply_1D_laplacian_N
-  
-  ! subroutine apply_1D_laplacian_N(au,u,n)
-  !   use type_defs
-  !   implicit none
-  !   integer, intent(in) :: n
-  !   real(dp), intent(out) :: au(n+1)
-  !   real(dp), intent(in)  ::  u(n)
-  !   integer :: i
-  !   Au(1) =   (u(2)   -        u(1)         )
-  !   Au(n) =   (       -        u(n) + u(n-1))
-  !   do i = 2,n-1
-  !      Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
-  !   end do
-  !   Au(n+1)=0
-  !   do i=1,n
-  !      Au(n+1)=Au(n+1)+u(i)
-  !   end do
-  ! end subroutine apply_1D_laplacian_N
 
+  subroutine apply_1D_laplacian_N_update(au,u,n)
+    use type_defs
+    implicit none
+    integer, intent(in) :: n
+    real(dp), intent(out) :: au(n+1)
+    real(dp), intent(in)  ::  u(n)
+    integer :: i
+    Au(1) =   (u(2)   -        u(1)         )
+    Au(n) =   (       -        u(n) + u(n-1))
+    do i = 2,n-1
+       Au(i)= (u(i+1) - 2.0_dp*u(i) + u(i-1))
+    end do
+    Au(n+1)=0
+    do i=1,n
+       Au(n+1)=Au(n+1)+u(i)
+    end do
+  end subroutine apply_1D_laplacian_N_update
 end module afuns
 
 module iterative_solver_D
@@ -140,7 +139,7 @@ contains
        res_norm2_t = sum(r_t**2)
        
        iter = iter + 1
-       write(*,*) iter, sqrt(res_norm2) 
+       write(*,*) iter, sqrt(res_norm2)
     end do
     x = x_isd
   end subroutine bicg_d
@@ -211,12 +210,13 @@ contains
     integer :: iter
     x_isn = 0.0_dp
     r_isn = b
+    
     res_norm20 = sum(r_isn**2)
     res_norm2 = res_norm20
     iter = 0
     do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) &
-        .and. (iter .lt. 1000000))
-      call apply_1D_laplacian_N(Ar_isn,r_isn,n)
+        .and. (iter .lt. 1e7))
+      call apply_1D_laplacian_N_update(Ar_isn,r_isn,n)
       alpha = res_norm2 / sum(r_isn*Ar_isn)
       x_isn = x_isn + alpha*r_isn
       r_isn = r_isn - alpha*Ar_isn
@@ -249,19 +249,21 @@ contains
     iter = 0
     do while ((res_norm2/res_norm20 .gt. TOL_ISN**2) &
          .and. (iter .lt. 1000000))
-      call apply_1D_laplacian_N(Ar_isn,p,n)
+      call apply_1D_laplacian_N(Ar_isn(1:n-1),p(1:n-1),n-1)
+      Ar_isn(1:n-1) = Ar_isn(1:n-1) + p(n)
+      Ar_isn(n) = sum(p(1:n-1))
+
       beta_d = sum(r_t(1,:)*r_isn)
       betadenom = sum(p_t(1,:)*Ar_isn)
       alpha = beta_d / betadenom
 
-      if (abs(betadenom) < 1e-10 .or. abs(beta_d) < 1e-10) then
-        EXIT
-      endif
-
       x_isn = x_isn + alpha*p
       x_t = x_t + alpha*p_t
       r_isn = r_isn - alpha*Ar_isn
-      call apply_1D_laplacian_N(Ar_isn,p_t(1,:),n)
+      call apply_1D_laplacian_N(Ar_isn(1:n-1),p_t(1,1:n-1),n-1)
+      Ar_isn(1:n-1) = Ar_isn(1:n-1) + p_t(1,n)
+      Ar_isn(n) = sum(p_t(1,1:n-1))
+
       r_t(1,:) = r_t(1,:) - alpha*Ar_isn
       beta_n = sum(r_t(1,:)*r_isn)
       beta = beta_n/beta_d
@@ -400,17 +402,14 @@ program ins
         CALL DGETRS('N',N_sys,1,A,N_sys,IPIV,b,N_sys,INFO)
         u(0:nx) = b(1:nx+1)
      else
-        ! FIX ME
-        call allocate_isn(N_sys-1)
+      call allocate_isn(N_sys)
         call set_tol_isn(tol)
         !call steep_descent gradient
         if (method == "SD") then
-          call steep_descent_N(u(0:nx),b(1:nx+1),N_sys-1)
-          !call steep_descent_N(u,b,N_sys)
+          call steep_descent_N(u,b,N_sys)
         !call bi-conjugate gradient
         elseif (method=="BI") then
-          call bicg_n(u(0:nx),b(1:nx+1),N_sys-1)
-          !call bicg_n(u,b,N_sys)
+          call bicg_n(u,b,N_sys)
         end if
         call deallocate_isn
      end if
